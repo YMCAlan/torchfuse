@@ -5,8 +5,8 @@ import torch.nn as nn
 import math
 import torch.nn.functional as F
 
-settings_dict = {
-    # kernel dilates/ stride in de_conv
+SETTING_CONFIG = {
+    # kernel dilates and stride in different large kernel size
     17: ([5, 9, 3, 3, 3], [1, 2, 4, 5, 7]),
     15: ([5, 7, 3, 3, 3], [1, 2, 3, 5, 7]),
     13: ([5, 7, 3, 3, 3], [1, 2, 3, 4, 5]),
@@ -30,54 +30,61 @@ def _fuse_bn(conv, bn):
 
 def convert_dilated_to_nondilated(kernel, dilate_rate):
     identity_kernel = torch.ones((1, 1, 1, 1)).to(kernel.device)
-    if kernel.size(1) == 1:
-        #   This is a DW kernel
-        dilated = F.conv_transpose2d(kernel, identity_kernel, stride=dilate_rate)
-        return dilated
+
+    if is_depthwise_kernel(kernel):
+        return F.conv_transpose2d(kernel, identity_kernel, stride=dilate_rate)
     else:
-        #   This is a dense or group-wise (but not DW) kernel
-        slices = []
-        for i in range(kernel.size(1)):
-            dilated = F.conv_transpose2d(kernel[:, i:i + 1, :, :], identity_kernel, stride=dilate_rate)
-            slices.append(dilated)
-        return torch.cat(slices, dim=1)
+        return convert_dense_to_nondilated(kernel, dilate_rate)
 
 
-def merge_dilated_into_large_kernel(large_kernel, dilated_kernel, dilated_r):
-    large_k = large_kernel.size(2)
-    dilated_k = dilated_kernel.size(2)
-    equivalent_kernel_size = dilated_r * (dilated_k - 1) + 1
-    equivalent_kernel = convert_dilated_to_nondilated(dilated_kernel, dilated_r)
-    rows_to_pad = large_k // 2 - equivalent_kernel_size // 2
+def is_depthwise_kernel(kernel):
+    return kernel.size(1) == 1
+
+
+def convert_dense_to_nondilated(kernel, dilate_rate):
+    slices = [
+        F.conv_transpose2d(kernel[:, i:i + 1, :, :], torch.ones((1, 1, 1, 1)).to(kernel.device), stride=dilate_rate) for
+        i in range(kernel.size(1))]
+    return torch.cat(slices, dim=1)
+
+
+def merge_dilated_into_large_kernel(large_kernel, dilated_kernel, dilate_rate):
+    large_kernel_size = large_kernel.size(2)
+    dilated_kernel_size = dilated_kernel.size(2)
+    equivalent_kernel_size = dilate_rate * (dilated_kernel_size - 1) + 1
+
+    equivalent_kernel = convert_dilated_to_nondilated(dilated_kernel, dilate_rate)
+    rows_to_pad = large_kernel_size // 2 - equivalent_kernel_size // 2
+
     merged_kernel = large_kernel + F.pad(equivalent_kernel, [rows_to_pad] * 4)
     return merged_kernel
 
 
-class DRB(nn.Module):
+class DRepConv(nn.Module):
     """
-       Dilated Reparam Block proposed in UniRepLKNet (https://github.com/AILab-CVC/UniRepLKNet)
-       We assume the inputs to this block are (N, C, H, W)
-       """
+       From Dilated Re-param Block proposed in UniRepLKNet (https://github.com/AILab-CVC/UniRepLKNet)
+    """
+    default_act = nn.SiLU()  # default activation
 
-    def __init__(self, c1, c2, k=1):
+    def __init__(self, c1, c2, k=1, act=True):
         super().__init__()
-        self.cv1 = Conv(c1, c2, k, g=math.gcd(c1, c2))
-        self.kernel_sizes, self.dilates = settings_dict[k][0], settings_dict[k][1]
 
+        self.cv1 = Conv(c1, c2, k, g=math.gcd(c1, c2), act=False)
+        self.kernel_sizes, self.dilates = SETTING_CONFIG[k][0], SETTING_CONFIG[k][1]
+        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
         for k, r in zip(self.kernel_sizes, self.dilates):
             self.__setattr__(
-                f'cv_k{k}_r{r}', Conv(c1, c2, k=k, s=1, p=(r * (k - 1) + 1) // 2, g=math.gcd(c1, c2), d=r)
+                f'cv_k{k}_r{r}', Conv(c1, c2, k=k, s=1, p=(r * (k - 1) + 1) // 2, g=math.gcd(c1, c2), d=r, act=False)
             )
 
     def forward(self, x):
         out = self.cv1(x)
         for k, r in zip(self.kernel_sizes, self.dilates):
-            cv_k_r = self.__getattr__(f'cv_k{k}_r{r}')
-            out = out + cv_k_r(x)
-        return out
+            out = out + self.__getattr__(f'cv_k{k}_r{r}')(x)
+        return self.act(out)
 
     def forward_fuse(self, x):
-        return self.cv1(x)
+        return self.act(self.cv1(x))
 
     def fuse_convs(self):
         kernel, bias = self.get_equivalent_kernel_bias()
