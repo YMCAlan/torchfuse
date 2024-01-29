@@ -3,6 +3,8 @@ import torch.nn as nn
 
 from typing import Union, Tuple, Any
 
+__all__ = ["fuse_conv_and_bn"]
+
 
 def fuse_nd_conv_and_nd_bn(conv: nn.Module, bn: nn.Module, is_transposed: bool, ndim: int) -> nn.Module:
     """
@@ -65,5 +67,5 @@ def fuse_conv_and_bn(
                          f"Convolution type: {type(conv).__name__}, BN type: {type(bn).__name__}.")
 
     is_transposed = True if "Transpose" in name else False
-    fused_conv = fuse_nd_conv_and_nd_bn(conv, bn, is_transposed,  int(conv_dim))
+    fused_conv = fuse_nd_conv_and_nd_bn(conv, bn, is_transposed, int(conv_dim))
     return fused_conv

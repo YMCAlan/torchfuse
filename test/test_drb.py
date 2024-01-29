@@ -5,7 +5,9 @@ import torch.nn.functional as F
 from torchfuse.unireplknet import DRepConv, convert_dilated_to_nondilated
 
 
+@pytest.mark.slow
 def test_equivalency():
+    """ Test Convert a dilated convolution kernel into a non-dilated convolution function. """
     in_channels = 1
     out_channels = 1
     groups = 1
@@ -35,24 +37,32 @@ def test_equivalency():
     print(dilated_conv.weight.data.squeeze())
     print(equivalent_kernel.squeeze())
 
-    print("\n ======== Error ============ \n")
-    relative_error = (equivalent_y - origin_y).abs().sum() / origin_y.abs().sum()
-    print('Relative error:', relative_error.item())
-    absolute_error = (equivalent_y - origin_y).abs().mean()
-    print('Mean Absolute error:', absolute_error.item())
+    print("\n======== Error ============\n")
+    relative_error = ((equivalent_y - origin_y).abs().sum() / origin_y.abs().sum()).item()
+    print('Relative error:', relative_error)
+    absolute_error = (equivalent_y - origin_y).abs().mean().item()
+    print('Mean Absolute error:', absolute_error)
+
+    assert relative_error < 1e-6
+    assert absolute_error < 1e-5
 
 
+@pytest.mark.slow
 def test_drb():
+    """ """
     model = DRepConv(3, 52, k=17).cuda().eval()
-    input = torch.randn((1, 3, 512, 512)).cuda()
+    x = torch.randn((1, 3, 512, 512)).cuda()
 
-    origin_output = model(input)
+    origin_output = model(x)
     model.fuse_convs()
     model.forward = model.forward_fuse
-    equivalent_output = model(input)
+    equivalent_output = model(x)
 
-    print("\n ======== Error ============ \n")
-    relative_error = (equivalent_output - origin_output).abs().sum() / origin_output.abs().sum()
-    print('Relative error:', relative_error.item())
-    absolute_error = (equivalent_output - origin_output).abs().mean()
-    print('Mean Absolute error:', absolute_error.item())
+    print("\n======== Error ============\n")
+    relative_error = ((equivalent_output - origin_output).abs().sum() / origin_output.abs().sum()).item()
+    print('Relative error:', relative_error)
+    absolute_error = (equivalent_output - origin_output).abs().mean().item()
+    print('Mean Absolute error:', absolute_error)
+
+    assert relative_error < 1e-3
+    assert absolute_error < 1e-3
