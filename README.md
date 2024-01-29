@@ -22,5 +22,5 @@ if __name__ == '__main__':
     print("Fused Output Predict :", fused_output.argmax().item())
 ```
 # Reference
-RepVGG: Making VGG-style ConvNets Great Again '
+RepVGG: Making VGG-style ConvNets Great Again
 [RepVGG](https://arxiv.org/pdf/2101.03697.pdf)
