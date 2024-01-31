@@ -1,7 +1,9 @@
 # Torchfuse
+
 The torchfuser provides a fuse functional, reducing both model parameters and FLOPs.
 
 # Usage
+
 ```Python
 import torch
 from torchvision.models.resnet import resnet50
@@ -21,6 +23,8 @@ if __name__ == '__main__':
     print("Output Predict :", output.argmax().item())
     print("Fused Output Predict :", fused_output.argmax().item())
 ```
+
 # Reference
+
 RepVGG: Making VGG-style ConvNets Great Again
 [RepVGG](https://arxiv.org/pdf/2101.03697.pdf)
