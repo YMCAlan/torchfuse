@@ -69,3 +69,27 @@ def fuse_conv_and_bn(
     is_transposed = True if "Transpose" in name else False
     fused_conv = fuse_nd_conv_and_nd_bn(conv, bn, is_transposed, int(conv_dim))
     return fused_conv
+
+
+def fc2conv1x1(fc: nn.Linear) -> nn.Conv2d:
+    """ Convert the linear layer into convolution 1x1 """
+    if not isinstance(fc, nn.Linear):
+        raise ValueError("Input is not the linear layer.")
+
+    conv1x1 = nn.Conv2d(
+        fc.in_features,
+        fc.out_features,
+        kernel_size=(1, 1),
+        stride=(1, 1),
+        padding=(0, 0),
+        bias=fc.bias is not None
+    ).requires_grad_(False).to(fc.weight.device)
+
+    clone_fc_weight = fc.weight.clone()
+    clone_fc_bias = fc.bias.clone()
+
+    # copy the fully connect weight to conv1x1
+    conv1x1.weight.copy_(clone_fc_weight[:, :, None, None])  # [in,out] -> [in, out, 1, 1]
+    conv1x1.bias.copy_(clone_fc_bias)
+
+    return conv1x1
